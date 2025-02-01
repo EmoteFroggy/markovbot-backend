@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
-const MarkovChain = require('markovchain');
+const { spawn } = require('child_process'); // <-- Require child_process
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -51,6 +51,36 @@ async function fetchMessages(channel) {
     }
 }
 
+// Function to call the Python script with the text corpus
+function generateMarkovText(corpus, endCount = 25) {
+    return new Promise((resolve, reject) => {
+        // Adjust the python command if needed (e.g., 'python3' on some systems)
+        const pythonProcess = spawn('python', ['markovify_generator.py', '--end', endCount]);
+        
+        let output = '';
+        let errorOutput = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            output += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (code !== 0) {
+                return reject(new Error(errorOutput));
+            }
+            resolve(output.trim());
+        });
+
+        // Write the corpus to the python process’s stdin
+        pythonProcess.stdin.write(corpus);
+        pythonProcess.stdin.end();
+    });
+}
+
 app.post('/api/generate', async (req, res) => {
     try {
         const { channelId } = req.body || {};
@@ -80,12 +110,10 @@ app.post('/api/generate', async (req, res) => {
             .map(msg => cleanContent(msg.content))
             .join(' ');
 
-        const markov = new MarkovChain(textData);
-        
-        // Generate longer text for better sentence completion
-        let generatedText = markov.parse(textData).end(25).process() || "";
-        
-        // Post-processing
+        // Use the Python script to generate Markov text
+        let generatedText = await generateMarkovText(textData, 25);
+
+        // Post-processing similar to before:
         generatedText = generatedText
             .replace(/https?:\/\/\S+/gi, '') // Remove any remaining URLs
             .replace(/\s+/g, ' ')            // Collapse multiple spaces
@@ -110,9 +138,8 @@ app.post('/api/generate', async (req, res) => {
                 finalText = words.slice(0, 15).join(' ') + '...';
             }
         } else {
-            // Generate again if minimum not met
-            finalText = markov.parse(textData).end(20).process() || "";
-            finalText = finalText.split(/\s+/).slice(0, 15).join(' ') + '...';
+            // Fallback: if the generated text is too short, use a simple truncation
+            finalText = words.slice(0, 15).join(' ') + '...';
         }
 
         res.json({
