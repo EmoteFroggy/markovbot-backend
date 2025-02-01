@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
-const MarkovChain = require('markovchain'); // Changed from markovify to markovchain
+const MarkovChain = require('markovchain');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -22,12 +22,11 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     process.exit(1);
 });
 
-// Clean messages from URLs and unwanted content
 function cleanContent(text) {
     return text
-        .replace(/https?:\/\/\S+/gi, '') // Remove URLs
-        .replace(/<[@#!?]\d+>/g, '')     // Remove mentions
-        .replace(/\s+/g, ' ')            // Collapse whitespace
+        .replace(/https?:\/\/\S+/gi, '')
+        .replace(/<[@#!?]\d+>/g, '')
+        .replace(/\s+/g, ' ')
         .trim();
 }
 
@@ -74,21 +73,26 @@ app.post('/api/generate', async (req, res) => {
             return res.status(400).json({ error: 'Need at least 50 messages' });
         }
 
-        // Build text corpus with sentence splitting
+        // Format text for MarkovChain
         const textData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => cleanContent(msg.content))
-            .join('. ') // Treat each message as potential sentence
-            .replace(/([.!?])\s*/g, '$1\n') // Split into sentences
-            .split('\n')
-            .filter(line => line.trim().length > 0);
+            .join(' '); // Join with spaces instead of newlines
 
-        // Create Markov model using markovchain
-        const markov = new MarkovChain(textData);
-        const generatedText = markov.parse(textData).end(15).process();
+        // Initialize and parse text
+        const markov = new MarkovChain();
+        markov.parse(textData);
+
+        // Generate text with sentence completion
+        let generatedText = markov.end(15).process();
+        
+        // Ensure minimum 15 words
+        if (generatedText.split(' ').length < 15) {
+            generatedText = markov.end(20).process();
+        }
 
         res.json({
-            markovText: generatedText,
+            markovText: generatedText || "Failed to generate text",
             messageCount: messages.length
         });
 
