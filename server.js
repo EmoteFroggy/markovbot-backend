@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
-const MarkovChain = require('markovchain');
+const Markov = require('markov-generator');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -26,8 +26,10 @@ function cleanContent(text) {
     return text
         .replace(/https?:\/\/\S+/gi, '')
         .replace(/<[@#!?]\d+>/g, '')
+        .replace(/[^\w\s'.,!?]/g, '')  // Remove special characters
         .replace(/\s+/g, ' ')
-        .trim();
+        .trim()
+        .toLowerCase(); // Normalize to lowercase for better consistency
 }
 
 async function fetchMessages(channel) {
@@ -69,30 +71,36 @@ app.post('/api/generate', async (req, res) => {
         }
 
         const messages = await fetchMessages(channel);
-        if (messages.length < 50) {
-            return res.status(400).json({ error: 'Need at least 50 messages' });
+        if (messages.length < 100) {  // Increased minimum message requirement
+            return res.status(400).json({ error: 'Need at least 100 messages' });
         }
 
-        // Format text for MarkovChain
-        const textData = messages
+        // Prepare training data
+        const trainingData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => cleanContent(msg.content))
-            .join(' '); // Join with spaces instead of newlines
+            .filter(text => text.split(' ').length > 2);  // Filter out short messages
 
-        // Initialize and parse text
-        const markov = new MarkovChain();
-        markov.parse(textData);
+        // Create Markov generator
+        const markov = new Markov({
+            input: trainingData,
+            minLength: 10,    // Minimum words per generated message
+            maxLength: 25,    // Maximum words per generated message
+            stateSize: 2      // Use bigrams (2-word sequences) for better context
+        });
 
-        // Generate text with sentence completion
-        let generatedText = markov.end(15).process();
-        
-        // Ensure minimum 15 words
-        if (generatedText.split(' ').length < 15) {
-            generatedText = markov.end(20).process();
+        // Generate multiple candidates and pick the best one
+        let generatedText;
+        try {
+            const candidates = Array(5).fill().map(() => markov.makeChain());
+            generatedText = candidates.sort((a, b) => b.length - a.length)[0];
+        } catch (error) {
+            console.error('Generation failed:', error);
+            generatedText = "Failed to generate coherent text";
         }
 
         res.json({
-            markovText: generatedText || "Failed to generate text",
+            markovText: generatedText,
             messageCount: messages.length
         });
 
