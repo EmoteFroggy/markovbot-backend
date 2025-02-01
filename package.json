@@ -4,7 +4,7 @@
   "description": "Markov bot",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node server.js",
     "postinstall": "pip install -r requirements.txt || true"
   },
   "dependencies": {
