@@ -7,15 +7,11 @@ const MarkovChain = require('markovchain');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware to force JSON responses
-app.use((req, res, next) => {
-    res.header('Content-Type', 'application/json');
-    next();
-});
-
+// Middleware Configuration
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+// Discord Client Setup
 const discordClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -29,6 +25,7 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     process.exit(1);
 });
 
+// Message Fetching
 async function fetchMessages(channel) {
     let messages = [];
     let lastId = null;
@@ -49,35 +46,32 @@ async function fetchMessages(channel) {
     }
 }
 
-// Unified JSON response handler
-function sendJsonResponse(res, status, data) {
-    return res.status(status).type('json').send(JSON.stringify(data, null, 2));
-}
-
-app.post('/generate-markov', async (req, res) => {
+// API Endpoint
+app.post('/api/generate', async (req, res) => {
     try {
         const { channelId } = req.body || {};
         
+        // Validation
         if (!channelId || channelId !== '752106070532554833') {
-            return sendJsonResponse(res, 400, { error: 'Invalid channel ID' });
+            return res.status(400).json({ error: 'Invalid channel ID' });
         }
 
         const channel = await discordClient.channels.fetch(channelId);
-        
         if (!channel?.isTextBased()) {
-            return sendJsonResponse(res, 400, { error: 'Not a text channel' });
+            return res.status(400).json({ error: 'Not a text channel' });
         }
 
         const permissions = channel.permissionsFor(discordClient.user);
         if (!permissions.has(PermissionsBitField.Flags.ViewChannel)) {
-            return sendJsonResponse(res, 403, { error: 'Missing permissions' });
+            return res.status(403).json({ error: 'Missing permissions' });
         }
 
         const messages = await fetchMessages(channel);
         if (messages.length < 50) {
-            return sendJsonResponse(res, 400, { error: 'Need at least 50 messages' });
+            return res.status(400).json({ error: 'Need at least 50 messages' });
         }
 
+        // Processing
         const textData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => msg.content)
@@ -86,30 +80,23 @@ app.post('/generate-markov', async (req, res) => {
         const markov = new MarkovChain(textData);
         const generatedText = markov.parse(textData).end(15).process();
 
-        sendJsonResponse(res, 200, {
+        res.json({
             markovText: generatedText || "Failed to generate text",
             messageCount: messages.length
         });
 
     } catch (error) {
         console.error('Error:', error);
-        sendJsonResponse(res, 500, { 
-            error: error.message.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '') 
-        });
+        res.status(500).json({ error: error.message });
     }
 });
 
-// Handle 404s
-app.use((req, res) => {
-    sendJsonResponse(res, 404, { error: 'Endpoint not found' });
+// Health Check
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
 });
 
-// Error handler
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    sendJsonResponse(res, 500, { error: 'Internal server error' });
-});
-
+// Start Server
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
