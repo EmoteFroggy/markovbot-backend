@@ -2,8 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
-const MarkovChain = require('markovchain');
-
+const markovify = require('markovify');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -23,11 +22,12 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     process.exit(1);
 });
 
-// Clean URLs from messages
+// Clean messages from URLs and unwanted content
 function cleanContent(text) {
     return text
         .replace(/https?:\/\/\S+/gi, '') // Remove URLs
-        .replace(/\s+/g, ' ')            // Remove extra spaces
+        .replace(/<[@#!?]\d+>/g, '')     // Remove mentions
+        .replace(/\s+/g, ' ')            // Collapse whitespace
         .trim();
 }
 
@@ -36,7 +36,7 @@ async function fetchMessages(channel) {
     let lastId = null;
     
     try {
-        while (messages.length < 500) {
+        while (messages.length < 1000) {
             const options = { limit: 100 };
             if (lastId) options.before = lastId;
 
@@ -74,49 +74,57 @@ app.post('/api/generate', async (req, res) => {
             return res.status(400).json({ error: 'Need at least 50 messages' });
         }
 
-        // Clean and prepare text data
+        // Build text corpus with sentence splitting
         const textData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => cleanContent(msg.content))
-            .join(' ');
+            .join('. ') // Treat each message as potential sentence
+            .replace(/([.!?])\s*/g, '$1\n') // Split into sentences
+            .split('\n')
+            .filter(line => line.trim().length > 0);
 
-        const markov = new MarkovChain(textData);
-        
-        // Generate longer text for better sentence completion
-        let generatedText = markov.parse(textData).end(25).process() || "";
-        
-        // Post-processing
-        generatedText = generatedText
-            .replace(/https?:\/\/\S+/gi, '') // Remove any remaining URLs
-            .replace(/\s+/g, ' ')            // Collapse multiple spaces
-            .trim();
+        // Create Markov model
+        const markov = new markovify.NewlineText(textData.join('\n'), {
+            stateSize: 2, // Bigrams for better context
+            maxAttempts: 25 // More attempts for sentence completion
+        });
 
-        // Ensure minimum 15 words and sentence completion
-        const words = generatedText.split(/\s+/);
-        let finalText = generatedText;
+        // Generate text with sentence completion
+        let generatedText = '';
+        let attempts = 0;
         
-        if (words.length >= 15) {
-            // Find last sentence-ending punctuation
-            const lastPunctuation = Math.max(
-                generatedText.lastIndexOf('.'),
-                generatedText.lastIndexOf('!'),
-                generatedText.lastIndexOf('?')
-            );
-
-            if (lastPunctuation > 0) {
-                finalText = generatedText.substring(0, lastPunctuation + 1);
-            } else {
-                // Add period if no punctuation found
-                finalText = words.slice(0, 15).join(' ') + '...';
+        while (attempts < 10) {
+            const sentence = markov.makeSentence({
+                minWords: 15,
+                maxWords: 30,
+                tries: 100
+            });
+            
+            if (sentence) {
+                generatedText = sentence
+                    .replace(/\s+([.,!?])/g, '$1') // Fix punctuation spacing
+                    .replace(/^[^a-zA-Z]+/, '')     // Remove leading non-letters
+                    .trim();
+                
+                // Ensure sentence ends with punctuation
+                if (!/[.!?]$/.test(generatedText)) {
+                    const lastPunct = generatedText.search(/[.!?](?=[^.!?]*$)/);
+                    generatedText = lastPunct > 0 ? 
+                        generatedText.slice(0, lastPunct + 1) : 
+                        generatedText + '...';
+                }
+                
+                break;
             }
-        } else {
-            // Generate again if minimum not met
-            finalText = markov.parse(textData).end(20).process() || "";
-            finalText = finalText.split(/\s+/).slice(0, 15).join(' ') + '...';
+            attempts++;
+        }
+
+        if (!generatedText) {
+            throw new Error('Failed to generate coherent text');
         }
 
         res.json({
-            markovText: finalText,
+            markovText: generatedText,
             messageCount: messages.length
         });
 
