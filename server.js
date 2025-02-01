@@ -84,33 +84,7 @@ app.post('/api/generate', async (req, res) => {
             .join(' ');
 
         const markov = new MarkovChain(textData);
-        // Generate text with improved sentence completion
-        let generatedText = '';
-        let currentSentence = '';
-        let wordCount = 0;
-        const maxWords = 50;
-        const minimumWords = 15;
-        
-        // Loop through generated words until we have a complete sentence
-        while (wordCount < maxWords) {
-            const nextWord = markov.parse(textData).generate();
-            currentSentence += (currentSentence ? ' ' : '') + nextWord;
-            wordCount++;
-            
-            // Check if we've reached minimum words and can end at a sentence boundary
-            if (wordCount >= minimumWords) {
-                const lastPunctuation = currentSentence.match(/[.!?]$/);
-                if (lastPunctuation) {
-                    generatedText = currentSentence;
-                    break;
-                }
-            }
-        }
-
-        if (!generatedText) {
-            // Fallback if we didn't find a good ending
-            generatedText = currentSentence;
-        }
+        const generatedText = markov.parse(textData).end(15).process();
 
         jsonResponse(res, 200, {
             markovText: generatedText || "Failed to generate text",
