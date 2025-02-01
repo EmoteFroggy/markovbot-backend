@@ -24,12 +24,17 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
 
 function cleanContent(text) {
     return text
+        // Preserve custom Discord emojis (convert to :name: format)
+        .replace(/<a?:([\w_]+):\d+>/g, ':$1:')
+        // Remove user/@ mentions, channel mentions, and role mentions
+        .replace(/<[@#!&]\d+>/g, '')
+        // Remove URLs but keep surrounding text
         .replace(/https?:\/\/\S+/gi, '')
-        .replace(/<[@#!?]\d+>/g, '')
-        .replace(/[^\w\s'.,!?]/g, '')  // Remove special characters
+        // Remove special characters except those needed for text/emojis
+        .replace(/[^\w\s'.,!?:\/]/g, '')
+        // Clean up whitespace
         .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase(); // Normalize to lowercase for better consistency
+        .trim();
 }
 
 async function fetchMessages(channel) {
@@ -37,7 +42,7 @@ async function fetchMessages(channel) {
     let lastId = null;
     
     try {
-        while (messages.length < 2000) {
+        while (messages.length < 2000) { // Increased to 2000 messages max
             const options = { limit: 100 };
             if (lastId) options.before = lastId;
 
@@ -45,6 +50,9 @@ async function fetchMessages(channel) {
             messages.push(...batch.values());
             if (batch.size < 100) break;
             lastId = batch.last()?.id;
+
+            // Add slight delay to avoid rate limits
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
         return messages;
     } catch (error) {
@@ -71,29 +79,40 @@ app.post('/api/generate', async (req, res) => {
         }
 
         const messages = await fetchMessages(channel);
-        if (messages.length < 100) {  // Increased minimum message requirement
-            return res.status(400).json({ error: 'Need at least 100 messages' });
+        if (messages.length < 150) {
+            return res.status(400).json({ error: 'Need at least 150 messages' });
         }
 
-        // Prepare training data
+        // Process messages with emoji preservation
         const trainingData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
-            .map(msg => cleanContent(msg.content))
-            .filter(text => text.split(' ').length > 2);  // Filter out short messages
+            .map(msg => {
+                const cleaned = cleanContent(msg.content);
+                // Preserve case for emojis, lowercase other text
+                return cleaned.includes(':') 
+                    ? cleaned 
+                    : cleaned.toLowerCase();
+            })
+            .filter(text => text.length > 0);
 
-        // Create Markov generator
+        // Create Markov generator with optimized settings
         const markov = new Markov({
             input: trainingData,
-            minLength: 15,    // Minimum words per generated message
-            maxLength: 50,    // Maximum words per generated message
-            stateSize: 2      // Use bigrams (2-word sequences) for better context
+            minLength: 8,
+            maxLength: 25,
+            stateSize: 2, // Bigrams for better emoji context
+            maxAttempts: 50
         });
 
-        // Generate multiple candidates and pick the best one
+        // Generate text with emoji support
         let generatedText;
         try {
-            const candidates = Array(5).fill().map(() => markov.makeChain());
-            generatedText = candidates.sort((a, b) => b.length - a.length)[0];
+            generatedText = markov.makeChain();
+            // Ensure at least 10 words (including emojis as "words")
+            const words = generatedText.split(/\s+/);
+            if (words.length < 10) {
+                generatedText = markov.makeChain();
+            }
         } catch (error) {
             console.error('Generation failed:', error);
             generatedText = "Failed to generate coherent text";
