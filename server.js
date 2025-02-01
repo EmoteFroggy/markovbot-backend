@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
-const { spawn } = require('child_process');
+const MarkovChain = require('markovchain');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -23,21 +23,20 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     process.exit(1);
 });
 
-// Clean URLs and extra spaces from messages
+// Clean URLs from messages
 function cleanContent(text) {
     return text
-        .replace(/https?:\/\/\S+/gi, '')
-        .replace(/\s+/g, ' ')
+        .replace(/https?:\/\/\S+/gi, '') // Remove URLs
+        .replace(/\s+/g, ' ')            // Remove extra spaces
         .trim();
 }
 
-// Fetch up to 1000 messages from the channel
 async function fetchMessages(channel) {
     let messages = [];
     let lastId = null;
-
+    
     try {
-        while (messages.length < 1000) {
+        while (messages.length < 500) {
             const options = { limit: 100 };
             if (lastId) options.before = lastId;
 
@@ -52,40 +51,10 @@ async function fetchMessages(channel) {
     }
 }
 
-// Call the Python script to generate Markov text
-function generateMarkovText(corpus, endCount = 25) {
-    return new Promise((resolve, reject) => {
-        // Adjust the command ('python' vs. 'python3') as needed for your environment
-        const pythonProcess = spawn('python', ['markovify_generator.py', '--end', endCount]);
-        let output = '';
-        let errorOutput = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            output += data.toString();
-        });
-
-        pythonProcess.stderr.on('data', (data) => {
-            errorOutput += data.toString();
-        });
-
-        pythonProcess.on('close', (code) => {
-            if (code !== 0) {
-                return reject(new Error(errorOutput));
-            }
-            resolve(output.trim());
-        });
-
-        // Write the corpus to the Python process’s stdin
-        pythonProcess.stdin.write(corpus);
-        pythonProcess.stdin.end();
-    });
-}
-
 app.post('/api/generate', async (req, res) => {
     try {
         const { channelId } = req.body || {};
-
-        // Validate channel ID (adjust your allowed channel IDs as needed)
+        
         if (!channelId || channelId !== '752106070532554833') {
             return res.status(400).json({ error: 'Invalid channel ID' });
         }
@@ -105,43 +74,52 @@ app.post('/api/generate', async (req, res) => {
             return res.status(400).json({ error: 'Need at least 50 messages' });
         }
 
-        // Build the corpus from non-bot messages
+        // Clean and prepare text data
         const textData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => cleanContent(msg.content))
             .join(' ');
 
-        // Generate text using the Python markovify script
-        let generatedText = await generateMarkovText(textData, 25);
-
-        // Post-processing: remove any residual URLs and collapse extra spaces
+        const markov = new MarkovChain(textData);
+        
+        // Generate longer text for better sentence completion
+        let generatedText = markov.parse(textData).end(25).process() || "";
+        
+        // Post-processing
         generatedText = generatedText
-            .replace(/https?:\/\/\S+/gi, '')
-            .replace(/\s+/g, ' ')
+            .replace(/https?:\/\/\S+/gi, '') // Remove any remaining URLs
+            .replace(/\s+/g, ' ')            // Collapse multiple spaces
             .trim();
 
-        // Ensure at least 15 words and try to complete the sentence
+        // Ensure minimum 15 words and sentence completion
         const words = generatedText.split(/\s+/);
         let finalText = generatedText;
+        
         if (words.length >= 15) {
+            // Find last sentence-ending punctuation
             const lastPunctuation = Math.max(
                 generatedText.lastIndexOf('.'),
                 generatedText.lastIndexOf('!'),
                 generatedText.lastIndexOf('?')
             );
+
             if (lastPunctuation > 0) {
                 finalText = generatedText.substring(0, lastPunctuation + 1);
             } else {
+                // Add period if no punctuation found
                 finalText = words.slice(0, 15).join(' ') + '...';
             }
         } else {
-            finalText = words.slice(0, 15).join(' ') + '...';
+            // Generate again if minimum not met
+            finalText = markov.parse(textData).end(20).process() || "";
+            finalText = finalText.split(/\s+/).slice(0, 15).join(' ') + '...';
         }
 
         res.json({
             markovText: finalText,
             messageCount: messages.length
         });
+
     } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ error: error.message });
