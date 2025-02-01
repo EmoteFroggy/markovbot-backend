@@ -5,13 +5,14 @@ const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js')
 const MarkovChain = require('markovchain');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
 
-// Allow all origins for public access
-app.use(cors({ origin: '*' }));
+// Enable CORS
+app.use(cors({ origin: 'https://emotefroggy.github.io' })); // ← REPLACE WITH YOUR GITHUB URL
 
 app.use(express.json());
 
+// Discord client setup
 const discordClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -20,24 +21,29 @@ const discordClient = new Client({
     ]
 });
 
+// Discord login
 discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     console.error('Login failed:', error);
     process.exit(1);
 });
 
+// Health check
+app.get('/health', (req, res) => res.sendStatus(200));
+
+// Message fetching
 async function fetchMessages(channel) {
     let messages = [];
     let lastId = null;
     
     try {
-        while (messages.length < 500) { // Reduced from 1000 to 500
+        while (messages.length < 1000) {
             const options = { limit: 100 };
             if (lastId) options.before = lastId;
 
             const batch = await channel.messages.fetch(options);
             messages.push(...batch.values());
-            if (batch.size < 100) break;
             lastId = batch.last()?.id;
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
         return messages;
     } catch (error) {
@@ -45,6 +51,7 @@ async function fetchMessages(channel) {
     }
 }
 
+// Main endpoint
 app.post('/generate-markov', async (req, res) => {
     try {
         const { channelId } = req.body;
@@ -60,7 +67,8 @@ app.post('/generate-markov', async (req, res) => {
         }
 
         const permissions = channel.permissionsFor(discordClient.user);
-        if (!permissions.has(PermissionsBitField.Flags.ViewChannel)) {
+        if (!permissions.has(PermissionsBitField.Flags.ViewChannel) || 
+            !permissions.has(PermissionsBitField.Flags.ReadMessageHistory)) {
             return res.status(403).json({ error: 'Missing permissions' });
         }
 
@@ -72,7 +80,7 @@ app.post('/generate-markov', async (req, res) => {
         const textData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => msg.content)
-            .join(' '); // Using spaces instead of newlines
+            .join('\n');
 
         const markov = new MarkovChain(textData);
         const generatedText = markov.parse(textData).end(15).process();
@@ -89,5 +97,5 @@ app.post('/generate-markov', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    console.log(`Server running at http://localhost:${port}`);
 });
