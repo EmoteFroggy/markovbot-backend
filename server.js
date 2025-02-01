@@ -24,10 +24,9 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
 
 function cleanContent(text) {
     return text
-        // Keep original emoji format <:name:id>
-        .replace(/<(@|#|!|\?)\d+>/g, '') // Remove other mentions
-        .replace(/https?:\/\/\S+/gi, '') // Remove URLs
-        .replace(/[^\w\s'.,!?<>:\/]/g, '') // Allow emoji syntax characters
+        .replace(/<(@|#|!|\?)\d+>/g, '')
+        .replace(/https?:\/\/\S+/gi, '')
+        .replace(/[^\w\s'.,!?<>:\/]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
