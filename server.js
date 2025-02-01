@@ -7,11 +7,15 @@ const MarkovChain = require('markovchain');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Enable CORS for all origins
+// Middleware to force JSON responses
+app.use((req, res, next) => {
+    res.header('Content-Type', 'application/json');
+    next();
+});
+
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Discord client setup
 const discordClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -20,25 +24,23 @@ const discordClient = new Client({
     ]
 });
 
-// Discord login
 discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     console.error('Login failed:', error);
     process.exit(1);
 });
 
-// Optimized message fetching
 async function fetchMessages(channel) {
     let messages = [];
     let lastId = null;
     
     try {
-        while (messages.length < 500) { // Limited to 500 messages for speed
+        while (messages.length < 500) {
             const options = { limit: 100 };
             if (lastId) options.before = lastId;
 
             const batch = await channel.messages.fetch(options);
             messages.push(...batch.values());
-            if (batch.size < 100) break; // Early exit
+            if (batch.size < 100) break;
             lastId = batch.last()?.id;
         }
         return messages;
@@ -47,56 +49,67 @@ async function fetchMessages(channel) {
     }
 }
 
-// Main endpoint
+// Unified JSON response handler
+function sendJsonResponse(res, status, data) {
+    return res.status(status).type('json').send(JSON.stringify(data, null, 2));
+}
+
 app.post('/generate-markov', async (req, res) => {
     try {
-        const { channelId } = req.body;
+        const { channelId } = req.body || {};
         
-        // Validate channel ID
-        if (channelId !== '752106070532554833') {
-            return res.status(400).json({ error: 'Invalid channel ID' });
+        if (!channelId || channelId !== '752106070532554833') {
+            return sendJsonResponse(res, 400, { error: 'Invalid channel ID' });
         }
 
-        // Get channel
         const channel = await discordClient.channels.fetch(channelId);
+        
         if (!channel?.isTextBased()) {
-            return res.status(400).json({ error: 'Not a text channel' });
+            return sendJsonResponse(res, 400, { error: 'Not a text channel' });
         }
 
-        // Check permissions
         const permissions = channel.permissionsFor(discordClient.user);
         if (!permissions.has(PermissionsBitField.Flags.ViewChannel)) {
-            return res.status(403).json({ error: 'Missing permissions' });
+            return sendJsonResponse(res, 403, { error: 'Missing permissions' });
         }
 
-        // Fetch messages
         const messages = await fetchMessages(channel);
         if (messages.length < 50) {
-            return res.status(400).json({ error: 'Need at least 50 messages' });
+            return sendJsonResponse(res, 400, { error: 'Need at least 50 messages' });
         }
 
-        // Process messages
         const textData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => msg.content)
-            .join(' '); // Using spaces instead of newlines
+            .join(' ');
 
-        // Generate text
         const markov = new MarkovChain(textData);
         const generatedText = markov.parse(textData).end(15).process();
 
-        res.json({
+        sendJsonResponse(res, 200, {
             markovText: generatedText || "Failed to generate text",
             messageCount: messages.length
         });
 
     } catch (error) {
-        console.error('Generation error:', error);
-        res.status(500).json({ error: error.message });
+        console.error('Error:', error);
+        sendJsonResponse(res, 500, { 
+            error: error.message.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '') 
+        });
     }
 });
 
-// Start server
+// Handle 404s
+app.use((req, res) => {
+    sendJsonResponse(res, 404, { error: 'Endpoint not found' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    sendJsonResponse(res, 500, { error: 'Internal server error' });
+});
+
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
