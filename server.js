@@ -37,7 +37,7 @@ async function fetchMessages(channel) {
     let lastId = null;
     
     try {
-        while (messages.length < 1000) {
+        while (messages.length < 2000) {
             const options = { limit: 100 };
             if (lastId) options.before = lastId;
 
