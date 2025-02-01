@@ -27,7 +27,7 @@ def main():
         
         # If no sentence is generated, try a shorter version
         if sentence is None:
-            sentence = text_model.make_short_sentence(140)
+            sentence = text_model.make_short_sentence(120)
         
         print(sentence if sentence else "")
     except Exception as e:
