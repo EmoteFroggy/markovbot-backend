@@ -84,8 +84,8 @@ app.post('/api/generate', async (req, res) => {
         // Create Markov generator
         const markov = new Markov({
             input: trainingData,
-            minLength: 10,    // Minimum words per generated message
-            maxLength: 25,    // Maximum words per generated message
+            minLength: 15,    // Minimum words per generated message
+            maxLength: 50,    // Maximum words per generated message
             stateSize: 2      // Use bigrams (2-word sequences) for better context
         });
 
