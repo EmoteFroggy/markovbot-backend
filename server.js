@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
-const markovify = require('markovify');
+const MarkovChain = require('markovchain'); // Changed from markovify to markovchain
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -83,45 +83,9 @@ app.post('/api/generate', async (req, res) => {
             .split('\n')
             .filter(line => line.trim().length > 0);
 
-        // Create Markov model
-        const markov = new markovify.NewlineText(textData.join('\n'), {
-            stateSize: 2, // Bigrams for better context
-            maxAttempts: 25 // More attempts for sentence completion
-        });
-
-        // Generate text with sentence completion
-        let generatedText = '';
-        let attempts = 0;
-        
-        while (attempts < 10) {
-            const sentence = markov.makeSentence({
-                minWords: 15,
-                maxWords: 30,
-                tries: 100
-            });
-            
-            if (sentence) {
-                generatedText = sentence
-                    .replace(/\s+([.,!?])/g, '$1') // Fix punctuation spacing
-                    .replace(/^[^a-zA-Z]+/, '')     // Remove leading non-letters
-                    .trim();
-                
-                // Ensure sentence ends with punctuation
-                if (!/[.!?]$/.test(generatedText)) {
-                    const lastPunct = generatedText.search(/[.!?](?=[^.!?]*$)/);
-                    generatedText = lastPunct > 0 ? 
-                        generatedText.slice(0, lastPunct + 1) : 
-                        generatedText + '...';
-                }
-                
-                break;
-            }
-            attempts++;
-        }
-
-        if (!generatedText) {
-            throw new Error('Failed to generate coherent text');
-        }
+        // Create Markov model using markovchain
+        const markov = new MarkovChain(textData);
+        const generatedText = markov.parse(textData).end(15).process();
 
         res.json({
             markovText: generatedText,
