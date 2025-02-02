@@ -119,8 +119,8 @@ app.post('/api/generate', async (req, res) => {
             input: sampledData,
             minLength: 25,  // Increased min length for more coherent text
             maxLength: 100, // Increased max length for more detailed text
-            stateSize: 2,   // Smaller state size for more uniqueness
-            maxAttempts: 50 // Balanced max attempts for better coherence
+            stateSize: 3,   // Smaller state size for more uniqueness
+            maxAttempts: 200 // Balanced max attempts for better coherence
         });
 
         let generatedText;
