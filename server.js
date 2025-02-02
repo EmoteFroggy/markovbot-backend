@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const Markov = require('markov-generator');
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -22,58 +23,40 @@ discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
     process.exit(1);
 });
 
+let cachedTrainingData = {};
+
 function cleanContent(text) {
     return text
-        .replace(/<(@|#|!|\?)\d+>/g, '')
+        .replace(/<(@|#|!|?)\d+>/g, '')
         .replace(/https?:\/\/\S+/gi, '')
-        .replace(/[^\w\s'.,!?<>:\/]/g, '')
+        .replace(/[^\w\s'.,!?<>:/]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
 
-async function fetchMessages(channel){
+async function fetchAndCacheMessages(channelId) {
+    const cache = cachedTrainingData[channelId];
+    const cacheDuration = 60 * 60 * 1000; // 1 hour
+
+    if (cache && cache.timestamp + cacheDuration > Date.now()) {
+        console.log('Using cached data for channel:', channelId);
+        return cache.data;
+    }
+
+    console.log('Fetching and caching messages for channel:', channelId);
+    const channel = await discordClient.channels.fetch(channelId);
     let messages = [];
     let lastId = null;
-    
-    try {
-        while(messages.length < 2000) {
-            const options = { limit: 100 };
-            if(lastId) options.before = lastId;
 
+    try {
+        while (messages.length < 2000) {
+            const options = { limit: 100 };
+            if (lastId) options.before = lastId;
             const batch = await channel.messages.fetch(options);
             messages.push(...batch.values());
-            if(batch.size < 100) break;
+            if (batch.size < 100) break;
             lastId = batch.last()?.id;
-
             await new Promise(resolve => setTimeout(resolve, 200));
-        }
-        return messages;
-    } catch(error) {
-        throw new Error('Failed to fetch messages');
-    }
-}
-
-app.post('/api/generate', async (req, res) => {
-    try {
-        const { channelId } = req.body || {};
-        
-        if(!channelId || channelId !== '752106070532554833') {
-            return res.status(400).json({ error: 'Invalid channel ID' });
-        }
-
-        const channel = await discordClient.channels.fetch(channelId);
-        if(!channel?.isTextBased()) {
-            return res.status(400).json({ error: 'Not a text channel' });
-        }
-
-        const permissions = channel.permissionsFor(discordClient.user);
-        if(!permissions.has(PermissionsBitField.Flags.ViewChannel)) {
-            return res.status(403).json({ error: 'Missing permissions' });
-        }
-
-        const messages = await fetchMessages(channel);
-        if(messages.length < 150) {
-            return res.status(400).json({ error: 'Need at least 150 messages' });
         }
 
         const trainingData = messages
@@ -81,30 +64,72 @@ app.post('/api/generate', async (req, res) => {
             .map(msg => cleanContent(msg.content))
             .filter(text => text.length > 0);
 
+        cachedTrainingData[channelId] = {
+            data: trainingData,
+            timestamp: Date.now()
+        };
+
+        return trainingData;
+    } catch (error) {
+        throw new Error('Failed to fetch messages');
+    }
+}
+
+function getRandomSubset(arr, size) {
+    if (arr.length <= size) return arr;
+    const shuffled = arr.slice().sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, size);
+}
+
+app.post('/api/generate', async (req, res) => {
+    try {
+        const { channelId } = req.body || {};
+        if (!channelId || channelId !== '752106070532554833') {
+            return res.status(400).json({ error: 'Invalid channel ID' });
+        }
+
+        const channel = await discordClient.channels.fetch(channelId);
+        if (!channel?.isTextBased()) {
+            return res.status(400).json({ error: 'Not a text channel' });
+        }
+
+        const permissions = channel.permissionsFor(discordClient.user);
+        if (!permissions.has(PermissionsBitField.Flags.ViewChannel)) {
+            return res.status(403).json({ error: 'Missing permissions' });
+        }
+
+        const trainingData = await fetchAndCacheMessages(channelId);
+        if (trainingData.length < 150) {
+            return res.status(400).json({ error: 'Need at least 150 messages' });
+        }
+
+        // Randomly sample a subset of the training data
+        const sampledData = getRandomSubset(trainingData, 500);
+
+        // Optimized Markov chain parameters
         const markov = new Markov({
-            input: trainingData,
-            minLength: 25,
-            maxLength: 50,
-            stateSize: 3,
-            maxAttempts: 50
+            input: sampledData,
+            minLength: 25,  // Increased min length for more coherent text
+            maxLength: 100, // Increased max length for more detailed text
+            stateSize: 2,   // Smaller state size for more uniqueness
+            maxAttempts: 50 // Balanced max attempts for better coherence
         });
 
         let generatedText;
         try {
             generatedText = markov.makeChain();
             const words = generatedText.split(/\s+/);
-            if(words.length < 10) generatedText = markov.makeChain();
-        } catch(error) {
+            if (words.length < 10) generatedText = markov.makeChain();
+        } catch (error) {
             console.error('Generation failed:', error);
             generatedText = "Failed to generate coherent text";
         }
 
         res.json({
             markovText: generatedText,
-            messageCount: messages.length
+            messageCount: trainingData.length
         });
-
-    } catch(error) {
+    } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ error: error.message });
     }
