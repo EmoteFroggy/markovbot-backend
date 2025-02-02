@@ -27,7 +27,7 @@ let cachedTrainingData = {};
 
 function cleanContent(text) {
     return text
-        .replace(/<(@|#|!|?)\d+>/g, '')
+        .replace(/<(@|#|!)\d+>/g, '') // Removed the unnecessary ?
         .replace(/https?:\/\/\S+/gi, '')
         .replace(/[^\w\s'.,!?<>:/]/g, '')
         .replace(/\s+/g, ' ')
@@ -124,12 +124,21 @@ app.post('/api/generate', async (req, res) => {
         });
 
         let generatedText;
-        try {
+        let attemptCount = 0;
+        const maxAttempts = 10; // Maximum number of attempts to generate text without "miku"
+
+        while (attemptCount < maxAttempts) {
             generatedText = markov.makeChain();
             const words = generatedText.split(/\s+/);
-            if (words.length < 10) generatedText = markov.makeChain();
-        } catch (error) {
-            console.error('Generation failed:', error);
+            if (words.length < 10) {
+                generatedText = markov.makeChain();
+            } else {
+                break;
+            }
+            attemptCount++;
+        }
+
+        if (attemptCount >= maxAttempts) {
             generatedText = "Failed to generate coherent text";
         }
 
