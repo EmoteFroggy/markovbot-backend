@@ -44,12 +44,6 @@ async function fetchAndCacheMessages(channelId) {
     }
 
     console.log('Fetching and caching messages for channel:', channelId);
-    cachedTrainingData[channelId] = {
-        data: [],
-        timestamp: Date.now(),
-        refreshing: true
-    };
-
     const channel = await discordClient.channels.fetch(channelId);
     let messages = [];
     let lastId = null;
@@ -65,10 +59,16 @@ async function fetchAndCacheMessages(channelId) {
             await new Promise(resolve => setTimeout(resolve, 200));
         }
 
+        const totalFetched = messages.length;
+        console.log(`Total messages fetched: ${totalFetched}`);
+
         const trainingData = messages
             .filter(msg => !msg.author.bot && msg.content.trim())
             .map(msg => cleanContent(msg.content))
             .filter(text => text.length > 0);
+
+        const totalFiltered = trainingData.length;
+        console.log(`Total messages after filtering: ${totalFiltered}`);
 
         cachedTrainingData[channelId] = {
             data: trainingData,
