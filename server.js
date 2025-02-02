@@ -3,8 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const Markov = require('markov-generator');
-const fs = require('fs');
-const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -72,10 +70,6 @@ async function fetchAndCacheMessages(channelId) {
         const totalFiltered = trainingData.length;
         console.log(`Total messages after filtering: ${totalFiltered}`);
 
-        if (totalFiltered < 150) {
-            throw new Error('Insufficient messages to train the Markov chain');
-        }
-
         cachedTrainingData[channelId] = {
             data: trainingData,
             timestamp: Date.now(),
@@ -84,13 +78,8 @@ async function fetchAndCacheMessages(channelId) {
 
         return trainingData;
     } catch (error) {
-        cachedTrainingData[channelId] = {
-            data: [],
-            timestamp: Date.now(),
-            refreshing: false
-        };
-        console.error('Failed to fetch or cache messages:', error);
-        throw error;
+        cachedTrainingData[channelId].refreshing = false;
+        throw new Error('Failed to fetch messages');
     }
 }
 
@@ -100,86 +89,11 @@ function getRandomSubset(arr, size) {
     return shuffled.slice(0, size);
 }
 
-// Log directory
-const logDirectory = path.join(__dirname, 'logs');
-if (!fs.existsSync(logDirectory)){
-    fs.mkdirSync(logDirectory);
-}
-
-// Log file
-const logFile = path.join(logDirectory, 'generations.log');
-
-function logGeneration(username, generatedText) {
-    const logEntry = `${new Date().toISOString()} - User: ${username} - Generated Text: ${generatedText}\n`;
-    fs.appendFile(logFile, logEntry, (err) => {
-        if (err) {
-            console.error('Error logging generation:', err);
-        }
-    });
-}
-
-// Function to update training data with new messages
-async function updateTrainingData(channelId) {
-    const cache = cachedTrainingData[channelId];
-    if (!cache) return;
-
-    const channel = await discordClient.channels.fetch(channelId);
-    let messages = [];
-    let lastId = cache.data[cache.data.length - 1]?.id || null; // Get the ID of the last cached message
-
-    try {
-        while (messages.length < 2000) {
-            const options = { limit: 100 };
-            if (lastId) options.after = lastId; // Fetch messages after the last cached message
-            const batch = await channel.messages.fetch(options);
-            messages.push(...batch.values());
-            if (batch.size < 100) break; // Stop if fewer than 100 messages are fetched
-            lastId = batch.last()?.id; // Update lastId to the last message ID in the batch
-            await new Promise(resolve => setTimeout(resolve, 200)); // Wait for 200ms before fetching the next batch
-        }
-
-        const totalFetched = messages.length;
-        console.log(`Total new messages fetched: ${totalFetched}`);
-
-        const newTrainingData = messages
-            .filter(msg => !msg.author.bot && msg.content.trim()) // Filter out bot messages and empty messages
-            .map(msg => cleanContent(msg.content)) // Clean the message content
-            .filter(text => text.length > 0); // Ensure the cleaned text is not empty
-
-        const totalNewFiltered = newTrainingData.length;
-        console.log(`Total new messages after filtering: ${totalNewFiltered}`);
-
-        if (totalNewFiltered > 0) {
-            const combinedData = [...cache.data, ...newTrainingData];
-            if (combinedData.length > 5000) {
-                combinedData.splice(0, combinedData.length - 5000); // Trim to 5000 messages
-            }
-            cachedTrainingData[channelId].data = combinedData; // Update cached data
-            cachedTrainingData[channelId].timestamp = Date.now(); // Update the timestamp
-        }
-    } catch (error) {
-        console.error('Failed to update training data:', error);
-    }
-}
-
 app.post('/api/generate', async (req, res) => {
     try {
-        const { channelId, startingWord, username } = req.body || {};
+        const { channelId, startingWord } = req.body || {};
         if (!channelId || channelId !== '752106070532554833') {
             return res.status(400).json({ error: 'Invalid channel ID' });
-        }
-
-        if (!username) {
-            return res.status(400).json({ error: 'Username is required' });
-        }
-
-        // Ensure initial caching is done
-        if (!cachedTrainingData[channelId]) {
-            try {
-                await fetchAndCacheMessages(channelId);
-            } catch (error) {
-                return res.status(500).json({ error: error.message });
-            }
         }
 
         const channel = await discordClient.channels.fetch(channelId);
@@ -192,24 +106,21 @@ app.post('/api/generate', async (req, res) => {
             return res.status(403).json({ error: 'Missing permissions' });
         }
 
-        // Update training data with new messages
-        await updateTrainingData(channelId);
-
-        const trainingData = cachedTrainingData[channelId].data;
+        const trainingData = await fetchAndCacheMessages(channelId);
         if (trainingData.length < 150) {
             return res.status(400).json({ error: 'Need at least 150 messages' });
         }
 
         // Randomly sample a subset of the training data
-        const sampledData = getRandomSubset(trainingData, 1000); // Increased subset size
+        const sampledData = getRandomSubset(trainingData, 500);
 
         // Optimized Markov chain parameters
         const markov = new Markov({
             input: sampledData,
-            minLength: 50,  // Increased min length for more coherent text
-            maxLength: 200, // Increased max length for more detailed text
-            stateSize: 3,   // Increased state size for more coherence
-            maxAttempts: 100 // Increased max attempts for better coherence
+            minLength: 25,  // Increased min length for more coherent text
+            maxLength: 100, // Increased max length for more detailed text
+            stateSize: 2,   // Smaller state size for more uniqueness
+            maxAttempts: 50 // Balanced max attempts for better coherence
         });
 
         let generatedText;
@@ -222,7 +133,7 @@ app.post('/api/generate', async (req, res) => {
                 generatedText = `${startingWord} ${generatedText}`;
             }
             const words = generatedText.split(/\s+/);
-            if (words.length < 50) { // Ensure the text meets the minLength requirement
+            if (words.length < 25) { // Ensure the text meets the minLength requirement
                 generatedText = markov.makeChain();
                 if (startingWord) {
                     generatedText = `${startingWord} ${generatedText}`;
@@ -236,9 +147,6 @@ app.post('/api/generate', async (req, res) => {
         if (attemptCount >= maxAttempts) {
             generatedText = "Failed to generate coherent text";
         }
-
-        // Log the generation
-        logGeneration(username, generatedText);
 
         res.json({
             markovText: generatedText,
@@ -260,17 +168,6 @@ app.get('/api/cache-status', (req, res) => {
     return res.json({
         lastRefreshed: new Date(cache.timestamp).toLocaleString(),
         refreshing: cache.refreshing
-    });
-});
-
-app.get('/api/logs', (req, res) => {
-    fs.readFile(logFile, 'utf8', (err, data) => {
-        if (err) {
-            console.error('Error reading log file:', err);
-            return res.status(500).json({ error: 'Failed to read log file' });
-        }
-        res.set('Content-Type', 'text/plain');
-        res.send(data);
     });
 });
 
