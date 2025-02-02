@@ -160,6 +160,10 @@ app.post('/api/generate', async (req, res) => {
             return res.status(400).json({ error: 'Invalid channel ID' });
         }
 
+        if (!username) {
+            return res.status(400).json({ error: 'Username is required' });
+        }
+
         const channel = await discordClient.channels.fetch(channelId);
         if (!channel?.isTextBased()) {
             return res.status(400).json({ error: 'Not a text channel' });
@@ -216,9 +220,7 @@ app.post('/api/generate', async (req, res) => {
         }
 
         // Log the generation
-        if (username) {
-            logGeneration(username, generatedText);
-        }
+        logGeneration(username, generatedText);
 
         res.json({
             markovText: generatedText,
