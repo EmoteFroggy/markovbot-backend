@@ -27,7 +27,7 @@ let cachedTrainingData = {};
 
 function cleanContent(text) {
     return text
-        .replace(/<(@|#|!)\d+>/g, '') // Removed the unnecessary ?
+        .replace(/<(@|#|!)\d+>/g, '')
         .replace(/https?:\/\/\S+/gi, '')
         .replace(/[^\w\s'.,!?<>:/]/g, '')
         .replace(/\s+/g, ' ')
@@ -111,27 +111,31 @@ app.post('/api/generate', async (req, res) => {
             return res.status(400).json({ error: 'Need at least 150 messages' });
         }
 
-        // Randomly sample a subset of the training data
         const sampledData = getRandomSubset(trainingData, 500);
 
-        // Optimized Markov chain parameters
         const markov = new Markov({
             input: sampledData,
-            minLength: 25,  // Increased min length for more coherent text
-            maxLength: 100, // Increased max length for more detailed text
-            stateSize: 2,   // Smaller state size for more uniqueness
-            maxAttempts: 50 // Balanced max attempts for better coherence
+            minLength: 25, 
+            maxLength: 100, 
+            stateSize: 2,   
+            maxAttempts: 200
         });
 
         let generatedText;
         let attemptCount = 0;
-        const maxAttempts = 10; // Maximum number of attempts to generate text without "miku"
+        const maxAttempts = 10; 
 
         while (attemptCount < maxAttempts) {
-            generatedText = markov.makeChain(startingWord);
+            generatedText = markov.makeChain();
+            if (startingWord) {
+                generatedText = `${startingWord} ${generatedText}`;
+            }
             const words = generatedText.split(/\s+/);
-            if (words.length < 10) {
-                generatedText = markov.makeChain(startingWord);
+            if (words.length < 25) { 
+                generatedText = markov.makeChain();
+                if (startingWord) {
+                    generatedText = `${startingWord} ${generatedText}`;
+                }
             } else {
                 break;
             }
