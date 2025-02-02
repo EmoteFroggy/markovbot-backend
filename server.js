@@ -72,6 +72,10 @@ async function fetchAndCacheMessages(channelId) {
         const totalFiltered = trainingData.length;
         console.log(`Total messages after filtering: ${totalFiltered}`);
 
+        if (totalFiltered < 150) {
+            throw new Error('Insufficient messages to train the Markov chain');
+        }
+
         cachedTrainingData[channelId] = {
             data: trainingData,
             timestamp: Date.now(),
@@ -80,8 +84,13 @@ async function fetchAndCacheMessages(channelId) {
 
         return trainingData;
     } catch (error) {
-        cachedTrainingData[channelId].refreshing = false;
-        throw new Error('Failed to fetch messages');
+        cachedTrainingData[channelId] = {
+            data: [],
+            timestamp: Date.now(),
+            refreshing: false
+        };
+        console.error('Failed to fetch or cache messages:', error);
+        throw error;
     }
 }
 
@@ -162,6 +171,15 @@ app.post('/api/generate', async (req, res) => {
 
         if (!username) {
             return res.status(400).json({ error: 'Username is required' });
+        }
+
+        // Ensure initial caching is done
+        if (!cachedTrainingData[channelId]) {
+            try {
+                await fetchAndCacheMessages(channelId);
+            } catch (error) {
+                return res.status(500).json({ error: error.message });
+            }
         }
 
         const channel = await discordClient.channels.fetch(channelId);
