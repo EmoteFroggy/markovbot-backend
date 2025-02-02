@@ -83,7 +83,7 @@ app.post('/api/generate', async (req, res) => {
 
         const markov = new Markov({
             input: trainingData,
-            minLength: 15,
+            minLength: 25,
             maxLength: 50,
             stateSize: 3,
             maxAttempts: 50
