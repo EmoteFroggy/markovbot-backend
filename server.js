@@ -91,7 +91,7 @@ function getRandomSubset(arr, size) {
 
 app.post('/api/generate', async (req, res) => {
     try {
-        const { channelId } = req.body || {};
+        const { channelId, startingWord } = req.body || {};
         if (!channelId || channelId !== '752106070532554833') {
             return res.status(400).json({ error: 'Invalid channel ID' });
         }
@@ -128,10 +128,10 @@ app.post('/api/generate', async (req, res) => {
         const maxAttempts = 10; // Maximum number of attempts to generate text without "miku"
 
         while (attemptCount < maxAttempts) {
-            generatedText = markov.makeChain();
+            generatedText = markov.makeChain(startingWord);
             const words = generatedText.split(/\s+/);
             if (words.length < 10) {
-                generatedText = markov.makeChain();
+                generatedText = markov.makeChain(startingWord);
             } else {
                 break;
             }
