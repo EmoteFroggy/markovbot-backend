@@ -44,6 +44,12 @@ async function fetchAndCacheMessages(channelId) {
     }
 
     console.log('Fetching and caching messages for channel:', channelId);
+    cachedTrainingData[channelId] = {
+        data: [],
+        timestamp: Date.now(),
+        refreshing: true
+    };
+
     const channel = await discordClient.channels.fetch(channelId);
     let messages = [];
     let lastId = null;
@@ -66,11 +72,13 @@ async function fetchAndCacheMessages(channelId) {
 
         cachedTrainingData[channelId] = {
             data: trainingData,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            refreshing: false
         };
 
         return trainingData;
     } catch (error) {
+        cachedTrainingData[channelId].refreshing = false;
         throw new Error('Failed to fetch messages');
     }
 }
@@ -127,12 +135,25 @@ app.post('/api/generate', async (req, res) => {
 
         res.json({
             markovText: generatedText,
-            messageCount: trainingData.length
+            messageCount: trainingData.length,
+            lastRefreshed: new Date(cachedTrainingData[channelId].timestamp).toLocaleString()
         });
     } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ error: error.message });
     }
+});
+
+app.get('/api/cache-status', (req, res) => {
+    const channelId = '752106070532554833';
+    const cache = cachedTrainingData[channelId];
+    if (!cache) {
+        return res.json({ lastRefreshed: 'Never', refreshing: false });
+    }
+    return res.json({
+        lastRefreshed: new Date(cache.timestamp).toLocaleString(),
+        refreshing: cache.refreshing
+    });
 });
 
 app.listen(port, () => {
